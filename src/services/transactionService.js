@@ -40,16 +40,40 @@ export const transactionService = {
         }
       }
 
-      // Map categories to transactions
-      const transactionsWithCategories = data.map(transaction => {
+      // Then, fetch sources separately and match them
+      let sources = [];
+      if (data && data.length > 0) {
+        // Get unique source IDs from transactions
+        const sourceIds = [...new Set(data.map(t => t.source_id).filter(id => id))];
+
+        if (sourceIds.length > 0) {
+          const { data: sourceData, error: sourceError } = await supabase
+            .from('sources')
+            .select('id, name, type, color')
+            .in('id', sourceIds)
+            .eq('user_id', user.id);
+
+          if (sourceError) {
+            console.error('Error fetching sources for transactions:', sourceError);
+            // Continue with transactions even if sources fail to load
+          } else {
+            sources = sourceData || [];
+          }
+        }
+      }
+
+      // Map categories and sources to transactions
+      const transactionsWithCategoriesAndSources = data.map(transaction => {
         const category = categories.find(cat => cat.id === transaction.category_id);
+        const source = sources.find(s => s.id === transaction.source_id);
         return {
           ...transaction,
-          categories: category || null
+          categories: category || null,
+          sources: source || null
         };
       });
 
-      return { data: transactionsWithCategories, error: null };
+      return { data: transactionsWithCategoriesAndSources, error: null };
     }
 
     return { data, error: null };
@@ -73,8 +97,9 @@ export const transactionService = {
     }
 
     // If transaction has a category_id, fetch the category info
+    let categoryData = null;
     if (data && data.category_id) {
-      const { data: categoryData, error: categoryError } = await supabase
+      const { data: categoryResult, error: categoryError } = await supabase
         .from('categories')
         .select('id, name, color')
         .eq('id', data.category_id)
@@ -83,14 +108,36 @@ export const transactionService = {
 
       if (categoryError) {
         console.error('Error fetching category for transaction:', categoryError);
-        // Continue with transaction even if category fails to load
-        return { data: { ...data, categories: null }, error: null };
       } else {
-        return { data: { ...data, categories: categoryData }, error: null };
+        categoryData = categoryResult;
       }
     }
 
-    return { data: { ...data, categories: null }, error: null };
+    // If transaction has a source_id, fetch the source info
+    let sourceData = null;
+    if (data && data.source_id) {
+      const { data: sourceResult, error: sourceError } = await supabase
+        .from('sources')
+        .select('id, name, type, color')
+        .eq('id', data.source_id)
+        .eq('user_id', user.id)
+        .single();
+
+      if (sourceError) {
+        console.error('Error fetching source for transaction:', sourceError);
+      } else {
+        sourceData = sourceResult;
+      }
+    }
+
+    return {
+      data: {
+        ...data,
+        categories: categoryData,
+        sources: sourceData
+      },
+      error: null
+    };
   },
 
   // Create new transaction
@@ -149,7 +196,7 @@ export const transactionService = {
       // Get total income
       const { data: incomeData, error: incomeError } = await supabase
         .from('transactions')
-        .select('amount')
+        .select('amount, source_id')
         .eq('user_id', user.id)
         .eq('type', 'income')
 
@@ -161,7 +208,7 @@ export const transactionService = {
       // Get total expense
       const { data: expenseData, error: expenseError } = await supabase
         .from('transactions')
-        .select('amount')
+        .select('amount, source_id')
         .eq('user_id', user.id)
         .eq('type', 'expense')
 
@@ -169,6 +216,45 @@ export const transactionService = {
         console.error('Error fetching expense data:', expenseError)
         return { data: null, error: expenseError }
       }
+
+      // Get sources data for summary
+      const allSourceIds = [
+        ...(incomeData?.map(t => t.source_id).filter(id => id) || []),
+        ...(expenseData?.map(t => t.source_id).filter(id => id) || [])
+      ];
+
+      let sourcesSummary = {};
+      if (allSourceIds.length > 0) {
+        const { data: sourcesData, error: sourcesError } = await supabase
+          .from('sources')
+          .select('id, name')
+          .in('id', [...new Set(allSourceIds)])
+          .eq('user_id', user.id);
+
+        if (!sourcesError && sourcesData) {
+          sourcesData.forEach(source => {
+            sourcesSummary[source.id] = {
+              name: source.name,
+              income: 0,
+              expense: 0
+            };
+          });
+        }
+      }
+
+      // Calculate income by source
+      incomeData?.forEach(t => {
+        if (t.source_id && sourcesSummary[t.source_id]) {
+          sourcesSummary[t.source_id].income += parseFloat(t.amount);
+        }
+      });
+
+      // Calculate expense by source
+      expenseData?.forEach(t => {
+        if (t.source_id && sourcesSummary[t.source_id]) {
+          sourcesSummary[t.source_id].expense += parseFloat(t.amount);
+        }
+      });
 
       const totalIncome = incomeData?.reduce((sum, t) => sum + parseFloat(t.amount), 0) || 0
       const totalExpense = expenseData?.reduce((sum, t) => sum + parseFloat(t.amount), 0) || 0
@@ -179,7 +265,8 @@ export const transactionService = {
           totalIncome,
           totalExpense,
           balance,
-          transactionCount: (incomeData?.length || 0) + (expenseData?.length || 0)
+          transactionCount: (incomeData?.length || 0) + (expenseData?.length || 0),
+          sourcesSummary // Include sources summary in the response
         },
         error: null
       }

@@ -1,61 +1,65 @@
 import { supabase } from '../lib/supabase'
 
-export const categoryService = {
-  // Get all categories for current user
-  async getCategories() {
+export const sourceService = {
+  // Get all sources for current user
+  async getSources() {
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
         console.log('No user found')
         return { data: [], error: 'No user' }
       }
-      
-      console.log('Fetching categories for user:', user.id)
-      
+
+      console.log('Fetching sources for user:', user.id)
+
       const { data, error } = await supabase
-        .from('categories')
+        .from('sources')
         .select('*')
         .eq('user_id', user.id)
-        .order('type', { ascending: false })
         .order('name', { ascending: true })
-      
+
       if (error) {
-        console.error('Error fetching categories:', error)
+        console.error('Error fetching sources:', error)
         return { data: [], error }
       }
-      
-      console.log('Categories fetched:', data?.length || 0)
+
+      console.log('Sources fetched:', data?.length || 0)
       return { data: data || [], error: null }
     } catch (error) {
-      console.error('Exception in getCategories:', error)
+      console.error('Exception in getSources:', error)
       return { data: [], error }
     }
   },
 
-  // Get categories by type
-  async getCategoriesByType(type) {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { data: [], error: 'No user' }
-    
-    const { data, error } = await supabase
-      .from('categories')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('type', type)
-      .order('name')
-    
-    return { data, error }
-  },
-
-  // Create new category
-  async createCategory(category) {
+  // Get source by ID
+  async getSource(id) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { data: null, error: 'No user' }
 
     const { data, error } = await supabase
-      .from('categories')
+      .from('sources')
+      .select('*')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single()
+
+    if (error) {
+      console.error('Error fetching source:', error)
+      return { data: null, error }
+    }
+
+    return { data, error: null }
+  },
+
+  // Create new source
+  async createSource(source) {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return { data: null, error: 'No user' }
+
+    const { data, error } = await supabase
+      .from('sources')
       .insert({
-        ...category,
+        ...source,
         user_id: user.id
       })
       .select()
@@ -64,13 +68,13 @@ export const categoryService = {
     return { data, error }
   },
 
-  // Update category
-  async updateCategory(id, updates) {
+  // Update source
+  async updateSource(id, updates) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { data: null, error: 'No user' }
 
     const { data, error } = await supabase
-      .from('categories')
+      .from('sources')
       .update(updates)
       .eq('id', id)
       .eq('user_id', user.id)
@@ -80,13 +84,13 @@ export const categoryService = {
     return { data, error }
   },
 
-  // Delete category
-  async deleteCategory(id) {
+  // Delete source
+  async deleteSource(id) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return { error: 'No user' }
 
     const { error } = await supabase
-      .from('categories')
+      .from('sources')
       .delete()
       .eq('id', id)
       .eq('user_id', user.id)
